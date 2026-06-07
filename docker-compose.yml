@@ -1,0 +1,57 @@
+services:
+
+  postfix:
+    build: .
+    container_name: postfix
+    restart: unless-stopped
+
+    environment:
+      # ── Required: set these to your real domain ──────────────────────────
+      POSTFIX_HOSTNAME:   mail.example.com      # must match your DNS MX / PTR record
+      POSTFIX_DOMAIN:     example.com
+
+      # ── Trusted networks ─────────────────────────────────────────────────
+      # 127.x = loopback; 172.20.0.0/16 = agentia Docker network default CIDR.
+      # Run `docker network inspect agentia` to confirm the subnet.
+      POSTFIX_MYNETWORKS: "127.0.0.0/8 172.20.0.0/16"
+
+      # ── Agent webhook ─────────────────────────────────────────────────────
+      # The URL on the agent network where your agent listens for inbound mail.
+      # Use the container name as hostname (Docker internal DNS).
+      AGENT_WEBHOOK_URL:  http://agent:8000/inbound-email
+
+    ports:
+      - "25:25"      # inbound SMTP from the internet
+      - "587:587"    # submission port for your agent to send replies
+
+    volumes:
+      # Mount your Let's Encrypt certificates (managed by Certbot on the host VM)
+      - /etc/letsencrypt/live/mail.example.com/fullchain.pem:/etc/postfix/tls/fullchain.pem:ro
+      - /etc/letsencrypt/live/mail.example.com/privkey.pem:/etc/postfix/tls/privkey.pem:ro
+
+      # Optional: persist the mail queue across container restarts
+      - postfix_queue:/var/spool/postfix
+
+      # Optional: override virtual/transport maps at runtime without rebuilding
+      # - ./config/virtual:/etc/postfix/virtual:ro
+      # - ./config/transport:/etc/postfix/transport:ro
+
+    networks:
+      - agentia                  # join the existing network your agent is on
+
+    # Postfix needs to send raw SMTP – capabilities needed inside the container
+    cap_add:
+      - NET_BIND_SERVICE         # bind port 25 (< 1024) as non-root if needed
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+networks:
+  agentia:
+    external: true    # this network already exists; created by your agent's compose file
+
+volumes:
+  postfix_queue:

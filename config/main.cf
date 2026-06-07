@@ -1,0 +1,83 @@
+# /etc/postfix/main.cf
+# ── Identity ──────────────────────────────────────────────────────────────────
+# Override these via environment variables in docker-compose.yml
+myhostname   = mail.example.com       # set via POSTFIX_HOSTNAME
+mydomain     = example.com            # set via POSTFIX_DOMAIN
+myorigin     = $mydomain
+
+# ── What to accept as "local" destination ─────────────────────────────────────
+# Postfix will accept mail for these domains and deliver to the agent.
+mydestination   = $myhostname, localhost
+virtual_alias_domains = $mydomain
+virtual_alias_maps    = hash:/etc/postfix/virtual
+
+# ── Network ───────────────────────────────────────────────────────────────────
+inet_interfaces  = all
+inet_protocols   = ipv4               # change to "all" if your host has IPv6
+
+# ── Trusted networks (no auth required to relay) ──────────────────────────────
+# 127.x and the agentia Docker network (172.20.0.0/16 by default).
+# Adjust the subnet to match your actual Docker network CIDR.
+mynetworks = 127.0.0.0/8 172.20.0.0/16
+
+# ── Relay ─────────────────────────────────────────────────────────────────────
+# Deliver directly (no smarthost). Postfix looks up MX records itself.
+relayhost =
+
+# ── Relay restrictions ────────────────────────────────────────────────────────
+smtpd_relay_restrictions =
+    permit_mynetworks,
+    reject_unauth_destination
+
+smtpd_recipient_restrictions =
+    permit_mynetworks,
+    reject_unauth_destination,
+    reject_unknown_recipient_domain
+
+# ── Inbound delivery → pipe to agent ─────────────────────────────────────────
+# All mail for $mydomain is forwarded via virtual alias map to a pipe transport.
+# See /etc/postfix/virtual and the 'agent' transport in master.cf.
+transport_maps = hash:/etc/postfix/transport
+
+# ── TLS – inbound (STARTTLS on port 25) ───────────────────────────────────────
+# Mount your real cert/key from Let's Encrypt via docker-compose volumes.
+smtpd_tls_cert_file   = /etc/postfix/tls/fullchain.pem
+smtpd_tls_key_file    = /etc/postfix/tls/privkey.pem
+smtpd_tls_security_level          = may        # offer STARTTLS; don't require it (RFC)
+smtpd_tls_protocols               = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
+smtpd_tls_mandatory_protocols     = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
+smtpd_tls_session_cache_database  = btree:${data_directory}/smtpd_scache
+smtpd_tls_loglevel                = 1
+
+# ── TLS – outbound (sending replies) ─────────────────────────────────────────
+smtp_tls_security_level           = may
+smtp_tls_protocols                = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
+smtp_tls_session_cache_database   = btree:${data_directory}/smtp_scache
+smtp_tls_loglevel                 = 1
+
+# ── Security hardening ────────────────────────────────────────────────────────
+smtpd_banner              = $myhostname ESMTP
+disable_vrfy_command      = yes
+smtpd_helo_required       = yes
+message_size_limit        = 26214400   # 25 MB
+smtpd_client_connection_count_limit = 20
+smtpd_client_connection_rate_limit  = 60
+
+smtpd_helo_restrictions =
+    permit_mynetworks,
+    reject_invalid_helo_hostname,
+    reject_non_fqdn_helo_hostname
+
+smtpd_sender_restrictions =
+    permit_mynetworks,
+    reject_non_fqdn_sender,
+    reject_unknown_sender_domain
+
+# ── Mailbox / queue ───────────────────────────────────────────────────────────
+# We don't store mail locally – everything is forwarded to the agent pipe.
+# A minimal mailbox setup is kept to avoid delivery errors during startup.
+mail_spool_directory = /var/spool/mail
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+# rsyslog inside the container writes to stdout (see entrypoint.sh).
+maillog_file = /dev/stdout

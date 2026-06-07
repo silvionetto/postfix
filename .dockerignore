@@ -1,0 +1,11 @@
+.git
+.gitignore
+.gradle
+build
+.idea
+.env
+*.md
+.mcp.json
+HELP.md
+AGENTS.md
+
